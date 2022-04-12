@@ -27,6 +27,7 @@ USERINCLUDE     += \
 # Needed to be compatible with the O= option
 LINUXINCLUDE    += \
                 -I$(srctree)/techpack/audio/include/uapi \
+                -I$(srctree)/techpack/audio/include/elliptic \
                 -I$(srctree)/techpack/audio/include
 
 #for mius start
@@ -58,6 +59,7 @@ LINUXINCLUDE    += \
 endif
 obj-y += soc/
 obj-y += dsp/
+obj-y += dsp/elliptic
 #for mius start
 ifeq ($(CONFIG_US_PROXIMITY), y)
 obj-y += dsp/mius
