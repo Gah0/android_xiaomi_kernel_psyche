@@ -39,6 +39,10 @@
 #include <dt-bindings/sound/audio-codec-port-types.h>
 #include "codecs/bolero/wsa-macro.h"
 #include "kona-port-config.h"
+#ifdef CONFIG_SND_SOC_TFA9874
+#include "codecs/tfa98xx/inc/tfa_platform_interface_definition.h"
+#endif
+
 
 #define DRV_NAME "kona-asoc-snd"
 #define __CHIPSET__ "KONA "
