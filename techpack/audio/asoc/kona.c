@@ -90,6 +90,49 @@
 #define WCN_CDC_SLIM_TX_CH_MAX 2
 #define WCN_CDC_SLIM_TX_CH_MAX_LITO 3
 
+
+//static atomic_t cs35l41_mclk_rsc_ref;
+#ifdef AUDIO_SM8250_FLAG
+  #if defined (CONFIG_TARGET_PRODUCT_PSYCHE)
+    #define CS35L41_SPEAKER_NAME "cs35l41.1-0040"
+    #define CS35L41_RECEIVER_NAME "cs35l41.1-0042"
+  #endif
+#else
+#define CS35L41_SPEAKER_NAME "cs35l41.2-0040"
+#define CS35L41_RECEIVER_NAME "cs35l41.2-0042"
+#endif
+
+
+#if defined(CONFIG_TARGET_PRODUCT_PSYCHE)
+struct snd_soc_dai_link_component cs35l41_codec_components[] = {
+	{
+		.name = CS35L41_SPEAKER_NAME,
+		//.dai_name = "cs35l41-pcm",
+		.dai_name = CS35L41_SPEAKER_NAME,
+	},
+#ifdef AUDIO_SM8250_FLAG
+	{
+		.name = CS35L41_RECEIVER_NAME,
+		//.dai_name = "cs35l41-pcm",
+		.dai_name = CS35L41_RECEIVER_NAME,
+	},
+#endif
+};
+#endif
+
+static struct snd_soc_codec_conf cs35l41_codec_conf[] = {
+	{
+		.dev_name	= CS35L41_SPEAKER_NAME,
+		.name_prefix	= "SPK",
+	},
+#ifdef AUDIO_SM8250_FLAG
+	{
+		.dev_name	= CS35L41_RECEIVER_NAME,
+		.name_prefix	= "RCV",
+	},
+#endif
+};
+
 enum {
 	RX_PATH = 0,
 	TX_PATH,
@@ -5273,6 +5316,128 @@ static struct snd_soc_ops msm_mi2s_be_ops = {
 	.shutdown = msm_mi2s_snd_shutdown,
 };
 
+/* use qcom default be ops */
+#if 0
+static int msm_hw_params_cs35l41_fixup(struct snd_soc_pcm_runtime *rtd,
+                                struct snd_pcm_hw_params *params)
+{
+	struct snd_interval *rate = hw_param_interval(params,
+		SNDRV_PCM_HW_PARAM_RATE);
+
+	struct snd_interval *channels = hw_param_interval(params,
+		SNDRV_PCM_HW_PARAM_CHANNELS);
+
+	param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT, SNDRV_PCM_FORMAT_S16_LE);
+
+	pr_debug("%s()\n", __func__);
+	rate->min = rate->max = 48000;
+	channels->min = channels->max = 2;
+
+	return 0;
+}
+
+static int msm_mi2s_cs35l41_startup(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_codec *codec = codec_dai->codec;
+	int ret;
+
+	if (atomic_inc_return(&cs35l41_mclk_rsc_ref) == 1) {
+		ret = msm_mi2s_snd_startup(substream);
+		if (ret) {
+			dev_err(card->dev, "%s: Failed to startup mi2s: %d\n", __func__, ret);
+			return ret;
+		}
+
+		// Set cpu_dai as master
+		ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_CBS_CFS);
+		if (ret < 0) {
+			dev_err(card->dev, "%s: Failed to set fmt cpu dai: %d\n", __func__, ret);
+			return ret;
+		}
+
+		// Set codec_dai as slave
+		ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_I2S);
+		if (ret < 0) {
+			dev_err(card->dev, "%s: Failed to set fmt codec dai: %d\n", __func__, ret);
+			return ret;
+		}
+
+		// Set mclk to 12.288MHz for codec
+		ret = snd_soc_codec_set_sysclk(codec, 0, 0,
+				Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ,
+				SND_SOC_CLOCK_IN);
+		if (ret < 0) {
+			dev_err(card->dev, "%s: Failed to set codec_sysclk: %d\n", __func__, ret);
+			return ret;
+		}
+	}
+	dev_info(card->dev, "------%s\n", __func__);
+	return 0;
+}
+
+void msm_mi2s_cs35l41_shutdown(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_codec *codec = codec_dai->codec;
+	struct msm_asoc_mach_data *pdata = pdata = snd_soc_card_get_drvdata(codec->component.card);
+
+
+	if (atomic_dec_return(&cs35l41_mclk_rsc_ref) == 0) {
+		msm_mi2s_snd_shutdown(substream);
+	}
+
+	dev_info(card->dev, "-----%s\n", __func__);
+	return;
+}
+
+static struct snd_soc_ops msm_mi2s_cs35l41_be_ops = {
+	.startup = msm_mi2s_cs35l41_startup,
+	.shutdown = msm_mi2s_cs35l41_shutdown,
+};
+#endif
+
+static int cs35l41_init(struct snd_soc_pcm_runtime *rtd)
+{
+#if 0
+	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_codec *spk_cdc = rtd->codec_dais[0]->codec;
+	struct snd_soc_dapm_context *spk_dapm = snd_soc_codec_get_dapm(spk_cdc);
+	struct snd_soc_codec *rcv_cdc = rtd->codec_dais[1]->codec;
+	struct snd_soc_dapm_context *rcv_dapm = snd_soc_codec_get_dapm(rcv_cdc);
+
+	dev_info(card->dev, "%s: found codec[%s]\n", __func__, dev_name(spk_cdc->dev));
+			snd_soc_dapm_ignore_suspend(spk_dapm, "AMP Playback");
+			snd_soc_dapm_ignore_suspend(spk_dapm, "AMP Capture");
+			snd_soc_dapm_ignore_suspend(spk_dapm, "DSP1");
+			snd_soc_dapm_ignore_suspend(spk_dapm, "Main AMP");
+			snd_soc_dapm_ignore_suspend(spk_dapm, "ASPRX1");
+			snd_soc_dapm_ignore_suspend(spk_dapm, "ASPRX2");
+			snd_soc_dapm_ignore_suspend(spk_dapm, "ASPTX1");
+			snd_soc_dapm_ignore_suspend(spk_dapm, "ASPTX2");
+			snd_soc_dapm_ignore_suspend(spk_dapm, "SPK");
+	snd_soc_dapm_sync(spk_dapm);
+
+	dev_info(card->dev, "%s: found codec[%s]\n", __func__, dev_name(rcv_cdc->dev));
+			snd_soc_dapm_ignore_suspend(rcv_dapm, "RCV AMP Playback");
+			snd_soc_dapm_ignore_suspend(rcv_dapm, "RCV AMP Capture");
+			snd_soc_dapm_ignore_suspend(rcv_dapm, "RCV DSP1");
+			snd_soc_dapm_ignore_suspend(rcv_dapm, "RCV Main AMP");
+			snd_soc_dapm_ignore_suspend(rcv_dapm, "RCV ASPRX1");
+			snd_soc_dapm_ignore_suspend(rcv_dapm, "RCV ASPRX2");
+			snd_soc_dapm_ignore_suspend(rcv_dapm, "RCV ASPTX1");
+			snd_soc_dapm_ignore_suspend(rcv_dapm, "RCV ASPTX2");
+			snd_soc_dapm_ignore_suspend(rcv_dapm, "RCV SPK");
+	snd_soc_dapm_sync(rcv_dapm);
+#endif
+	return 0;
+}
+
 static struct snd_soc_ops msm_fe_qos_ops = {
 	.prepare = msm_fe_qos_prepare,
 };
@@ -6898,6 +7063,80 @@ static struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
 	},
 };
 
+#ifdef AUDIO_SM8250_FLAG  //j1
+static struct snd_soc_dai_link tert_mi2s_rx_cs35l41_dai_links[] = {
+#if defined(CONFIG_TARGET_PRODUCT_PSYCHE)
+	{
+		.name = LPASS_BE_TERT_TDM_RX_0,
+		.stream_name = "Tertiary TDM0 Playback",
+		.cpu_dai_name = "msm-dai-q6-tdm.36896",
+		.platform_name = "msm-pcm-routing",
+		.codecs = cs35l41_codec_components,
+		.num_codecs = ARRAY_SIZE(cs35l41_codec_components),
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.id = MSM_BACKEND_DAI_TERT_TDM_RX_0,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &kona_tdm_be_ops,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		.init = &cs35l41_init,
+	},
+  	{
+		.name = LPASS_BE_TERT_TDM_RX_1,
+		.stream_name = "Tertiary TDM1 Playback",
+		.cpu_dai_name = "msm-dai-q6-tdm.36898",
+		.platform_name = "msm-pcm-routing",
+		.codecs = cs35l41_codec_components,
+		.num_codecs = ARRAY_SIZE(cs35l41_codec_components),
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.id = MSM_BACKEND_DAI_TERT_TDM_RX_1,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &kona_tdm_be_ops,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		.init = &cs35l41_init,
+	},
+#else
+	{
+		.name = LPASS_BE_TERT_MI2S_RX,
+		.stream_name = "Tertiary MI2S Playback",
+		.cpu_dai_name = "msm-dai-q6-mi2s.2",
+		.platform_name = "msm-pcm-routing",
+		.codecs = cs35l41_codec_components,
+		.num_codecs = ARRAY_SIZE(cs35l41_codec_components),
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.id = MSM_BACKEND_DAI_TERTIARY_MI2S_RX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_mi2s_be_ops,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		.init = &cs35l41_init,
+	},
+#endif
+};
+static struct snd_soc_dai_link sec_mi2s_rx_cs35l41_dai_links[] = {
+	{
+		.name = LPASS_BE_SEC_MI2S_RX,
+		.stream_name = "Secondary MI2S Playback",
+		.cpu_dai_name = "msm-dai-q6-mi2s.1",
+		.platform_name = "msm-pcm-routing",
+		.codecs = cs35l41_codec_components,
+		.num_codecs = ARRAY_SIZE(cs35l41_codec_components),
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.id = MSM_BACKEND_DAI_SECONDARY_MI2S_RX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_mi2s_be_ops,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		.init = &cs35l41_init,
+	},
+};
+
+#endif
 static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 	/* Primary AUX PCM Backend DAI Links */
 	{
@@ -7291,6 +7530,10 @@ static struct snd_soc_dai_link msm_kona_dai_links[
 			ARRAY_SIZE(msm_common_misc_fe_dai_links) +
 			ARRAY_SIZE(msm_common_be_dai_links) +
 			ARRAY_SIZE(msm_mi2s_be_dai_links) +
+#ifdef AUDIO_SM8250_FLAG
+			ARRAY_SIZE(tert_mi2s_rx_cs35l41_dai_links) +
+			ARRAY_SIZE(sec_mi2s_rx_cs35l41_dai_links) +
+#endif
 			ARRAY_SIZE(msm_auxpcm_be_dai_links) +
 			ARRAY_SIZE(msm_wsa_cdc_dma_be_dai_links) +
 			ARRAY_SIZE(msm_rx_tx_cdc_dma_be_dai_links) +
@@ -7421,6 +7664,8 @@ static struct snd_soc_ops msm_stub_be_ops = {
 
 struct snd_soc_card snd_soc_card_stub_msm = {
 	.name		= "kona-stub-snd-card",
+	.codec_conf	= cs35l41_codec_conf,
+	.num_configs	= ARRAY_SIZE(cs35l41_codec_conf),
 };
 
 static struct snd_soc_dai_link msm_stub_fe_dai_links[] = {
